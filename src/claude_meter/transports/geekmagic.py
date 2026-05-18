@@ -46,26 +46,44 @@ class GeekmagicTransport:
         else:
             raise ValueError(f"unsupported mode for geekmagic: {self._mode!r}")
 
+        # The firmware often sends a truncated HTTP response after a
+        # successful write — status line + headers, then it closes the
+        # socket mid-body. Stream the response so we read only the
+        # status and headers and never the body; otherwise a perfectly
+        # good upload surfaces as a ChunkedEncodingError. timeout is
+        # (connect, read-headers): the device can be slow to reply
+        # while it commits the image to flash.
         resp = requests.post(
             self._url,
             files={"imageFile": (filename, body, "image/jpeg")},
-            timeout=5,
+            timeout=(5, 15),
+            stream=True,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        finally:
+            resp.close()
         return len(body)
 
 
 def _build_gif_container(frame: bytes, count: int = GIF_FRAME_COUNT) -> bytes:
     """
-    Wrap N copies of a single JPEG frame in the firmware's container
-    format: frame0 | 2400-byte index | frame1 | ... | frameN-1.
+    Wrap a single JPEG frame in the firmware's container format.
+
+    The usage card is static, so all `count` frames are byte-identical.
+    Instead of shipping `count` physical copies, lay down one frame and
+    alias every index record back at it (offset 0). The index still
+    declares `count` frames so the firmware's minimum-frame check passes,
+    but the upload carries one frame instead of `count` — roughly 88 KB
+    down to ~5 KB, so the device writes far less flash per push.
+
+    Layout: frame0 | 2400-byte index. Every record -> (offset 0, f_size).
     """
     f_size = len(frame)
     idx    = bytearray(GIF_INDEX_SIZE)
-    # Record 0: id = total frame count; v1 = 0 (frame0 offset); v2 = frame0 size.
+    # Record 0: id = total frame count; offset/size point at frame0.
     struct.pack_into("<HHII", idx, 0, 0x01ff, count, 0, f_size)
-    # Records 1..count-1: id = frame index; v1 = absolute offset; v2 = size.
+    # Records 1..count-1: alias every frame back to frame0 at offset 0.
     for k in range(1, count):
-        offset = f_size + GIF_INDEX_SIZE + (k - 1) * f_size
-        struct.pack_into("<HHII", idx, k * 12, 0x01ff, k, offset, f_size)
-    return frame + bytes(idx) + frame * (count - 1)
+        struct.pack_into("<HHII", idx, k * 12, 0x01ff, k, 0, f_size)
+    return frame + bytes(idx)
