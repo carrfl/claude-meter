@@ -41,7 +41,13 @@ def run(cfg: Config) -> None:
                 print(f"{_ts()} 5h {five_pct:.0f}%  7d {week_pct:.0f}%  "
                       f"unchanged, skipped", flush=True)
             else:
-                payload = renderer.render(five_pct, five_reset, week_pct, week_reset)
+                if hasattr(renderer, "render_frames"):
+                    # Animated renderer (e.g. visual_story): needs the raw
+                    # usage dict (resets_at, etc.), not the pre-formatted
+                    # display strings the plain Renderer protocol gets.
+                    payload = renderer.render_frames(data)
+                else:
+                    payload = renderer.render(five_pct, five_reset, week_pct, week_reset)
                 n = transport.push(payload)
                 last_key     = key
                 last_push_ts = now

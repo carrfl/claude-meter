@@ -54,4 +54,9 @@ def get(mode: str) -> Renderer:
     if mode == "photo240":
         from claude_meter.renderers.photo240 import Photo240Renderer
         return Photo240Renderer()
-    raise ValueError(f"unknown render mode: {mode!r} (expected 'gif80' or 'photo240')")
+    if mode == "visual_story":
+        from claude_meter.renderers.visual_story import VisualStoryRenderer
+        return VisualStoryRenderer()
+    raise ValueError(
+        f"unknown render mode: {mode!r} (expected 'gif80', 'photo240', or 'visual_story')"
+    )
